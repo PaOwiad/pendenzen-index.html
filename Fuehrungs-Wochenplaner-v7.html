@@ -5743,50 +5743,54 @@ async function fwpPullFromSupabase() {
   if (!url || !key) return;
   fwpSetSyncDot('syncing');
   try {
+    // Alle Tasks von Supabase holen
     const [tRes, mRes] = await Promise.all([
-      fwpSupa('tasks?order=id&select=id,source,updated_at'),
+      fwpSupa('tasks?order=updated_at.desc'),
       fwpSupa('meta?select=key,value'),
     ]);
     if (!tRes.ok) throw new Error('Tasks ' + tRes.status);
     const tData = await tRes.json();
     const mData = mRes.ok ? await mRes.json() : [];
 
-    // Nur neue Tasks vom Handy (source='Mobil' und ID lokal unbekannt) hinzufügen
-    const localIds = new Set(tasks.map(t => t.id));
-    const newMobileIds = tData
-      .filter(rt => !localIds.has(rt.id) && rt.source === 'Mobil')
-      .map(rt => rt.id);
-
-    if (newMobileIds.length > 0) {
-      // Volle Daten für neue Mobile-Tasks laden
-      const newRes = await fwpSupa('tasks?id=in.(' + newMobileIds.join(',') + ')');
-      if (newRes.ok) {
-        const newTasks = await newRes.json();
-        newTasks.forEach(rt => {
-          tasks.push({
-            id: rt.id, title: rt.title || '', notes: rt.notes || '',
-            prio: rt.prio || 'mittel', type: rt.type || 'Auftrag',
-            who: rt.who || '', date: rt.date || '',
-            done: rt.done || false, source: rt.source || '',
-            bucketId: rt.bucket_id || pdzBuckets[0]?.id || 1,
-          });
+    let changed = 0;
+    tData.forEach(rt => {
+      const local = tasks.find(t => t.id === rt.id);
+      if (!local) {
+        // Neue Task vom Handy
+        tasks.push({
+          id: rt.id, title: rt.title || '', notes: rt.notes || '',
+          prio: rt.prio || 'mittel', type: rt.type || 'Auftrag',
+          who: rt.who || '', date: rt.date || '',
+          done: rt.done || false, source: rt.source || '',
+          bucketId: rt.bucket_id || pdzBuckets[0]?.id || 1,
         });
+        changed++;
+      } else if (rt.source === 'Mobil' && rt.updated_at > (local._updatedAt || '')) {
+        // Mobile-Task ist neuer — remote gewinnt
+        local.title = rt.title || local.title;
+        local.notes = rt.notes !== undefined ? rt.notes : local.notes;
+        local.prio   = rt.prio  || local.prio;
+        local.type   = rt.type  || local.type;
+        local.who    = rt.who   !== undefined ? rt.who  : local.who;
+        local.date   = rt.date  !== undefined ? rt.date : local.date;
+        local.done   = rt.done  !== undefined ? rt.done : local.done;
+        local.bucketId = rt.bucket_id || local.bucketId;
+        changed++;
       }
-    }
+    });
 
     // IDs aktualisieren
     const nti = mData.find(m => m.key === 'nextTaskId');
     if (nti) nextTaskId = Math.max(nextTaskId, parseInt(nti.value) || nextTaskId);
 
-    if (newMobileIds.length > 0) {
-      pdzMigrateTasks();
-      pdzRender();
-      saveAll();
-      toast(newMobileIds.length + ' neue Pendenz(en) vom Handy geladen');
-    }
-
+    pdzMigrateTasks();
+    pdzRender();
+    saveAll();
     fwpSetSyncDot('ok');
     setTimeout(() => fwpSetSyncDot(''), 3000);
+    if (changed > 0) toast(changed + ' Pendenz(en) vom Handy aktualisiert');
+    else toast('Keine neuen Pendenzen vom Handy');
+
   } catch(e) {
     fwpSetSyncDot('err');
     console.warn('Pull Fehler:', e.message);
