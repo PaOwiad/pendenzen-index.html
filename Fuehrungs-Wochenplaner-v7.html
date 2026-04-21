@@ -1124,6 +1124,7 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
         <button class="pdz-filter-btn" id="pdz-filter-Planen" onclick="pdzSetFilter('Planen',this)">&#128197; Planen</button>
         <button class="pdz-filter-btn" id="pdz-filter-Idee" onclick="pdzSetFilter('Idee',this)">&#128161; Idee</button>
         <div class="pdz-toolbar-right">
+          <button class="topbar-btn" onclick="fwpPullFromSupabase()" title="Neue Pendenzen vom Handy laden">&#8635; Handy</button>
           <button class="topbar-btn" onclick="pdzOpenDoneModal()">&#10003; Erledigt (&#8203;<span id="pdz-done-count">0</span>)</button>
           <button class="topbar-btn" onclick="pdzOpenMailModal()" title="E-Mail / Outlook Report">&#128231; Bericht</button>
         </div>
