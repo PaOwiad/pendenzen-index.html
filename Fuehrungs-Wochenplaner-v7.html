@@ -5695,15 +5695,18 @@ async function fwpDoSync() {
     });
     if (!bRes.ok) throw new Error('Buckets ' + bRes.status);
 
-    // Tasks upsert (only open + recently done)
-    const tRows = tasks.map(t => ({
-      id: t.id, title: t.title || '', notes: t.notes || '',
-      prio: t.prio || 'mittel', type: t.type || 'Auftrag',
-      who: t.who || '', date: t.date || '',
-      done: t.done || false, source: t.source || '',
-      bucket_id: t.bucketId || pdzBuckets[0]?.id || 1,
-      updated_at: new Date().toISOString(),
-    }));
+    // Tasks upsert — Duplikate entfernen (nur erste Instanz pro ID)
+    const seenIds = new Set();
+    const tRows = tasks
+      .filter(t => { if (seenIds.has(t.id)) return false; seenIds.add(t.id); return true; })
+      .map(t => ({
+        id: t.id, title: t.title || '', notes: t.notes || '',
+        prio: t.prio || 'mittel', type: t.type || 'Auftrag',
+        who: t.who || '', date: t.date || '',
+        done: t.done || false, source: t.source || '',
+        bucket_id: t.bucketId || pdzBuckets[0]?.id || 1,
+        updated_at: new Date().toISOString(),
+      }));
     if (tRows.length > 0) {
       const tRes = await fwpSupa('tasks', {
         method: 'POST',
