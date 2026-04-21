@@ -326,6 +326,7 @@ body {
     <div class="header-right">
       <div class="sync-dot" id="sync-dot" title="Sync-Status"></div>
       <button class="icon-btn" onclick="openDoneModal()">Erledigt</button>
+      <button class="icon-btn" onclick="openBucketSheet()">📂</button>
       <button class="icon-btn" onclick="openCfgSheet()">⚙</button>
     </div>
   </div>
@@ -438,6 +439,28 @@ body {
     <button onclick="resetConfig()" style="width:100%;margin-top:8px;padding:10px;background:none;border:1px solid var(--red);border-radius:var(--radius);color:var(--red);font-size:13px;cursor:pointer;font-family:inherit;">
       🗑 Zugangsdaten löschen & neu eingeben
     </button>
+  </div>
+</div>
+
+<!-- BUCKET SHEET -->
+<div class="overlay" id="bucket-ov" onclick="closeBucketSheet()"></div>
+<div class="sheet" id="bucket-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-hd">
+    <span class="sheet-hd-title">📂 Bereiche verwalten</span>
+    <button class="close-btn" onclick="closeBucketSheet()">✕</button>
+  </div>
+  <div style="padding:16px 20px;">
+    <div id="bucket-list"></div>
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
+      <div class="flabel" style="margin-bottom:8px;">Neuer Bereich</div>
+      <div style="display:flex;gap:8px;">
+        <input class="field input" id="new-bucket-input" type="text" placeholder="Bereichsname..."
+          style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:15px;font-family:inherit;outline:none;"
+          onkeydown="if(event.key==='Enter')addBucket()" />
+        <button onclick="addBucket()" style="padding:10px 14px;background:var(--text);color:white;border:none;border-radius:8px;font-size:15px;cursor:pointer;">+</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -845,6 +868,83 @@ function toast(msg) {
   el.textContent = msg; el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+// ── BUCKET MANAGEMENT ────────────────────────────────────────────
+function openBucketSheet() {
+  renderBucketList();
+  document.getElementById('bucket-ov').classList.add('open');
+  document.getElementById('bucket-sheet').classList.add('open');
+}
+function closeBucketSheet() {
+  document.getElementById('bucket-ov').classList.remove('open');
+  document.getElementById('bucket-sheet').classList.remove('open');
+}
+
+function renderBucketList() {
+  const list = document.getElementById('bucket-list');
+  list.innerHTML = buckets.map(b => `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
+      <span style="flex:1;font-size:15px;">${b.isIdeas ? '💡 ' : ''}${esc(b.name)}</span>
+      <button onclick="renameBucket(${b.id})" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:none;font-size:12px;cursor:pointer;color:var(--text2);">✏</button>
+      ${!b.isIdeas ? `<button onclick="deleteBucket(${b.id})" style="padding:5px 10px;border:1px solid var(--red);border-radius:6px;background:none;font-size:12px;cursor:pointer;color:var(--red);">✕</button>` : ''}
+    </div>`).join('');
+}
+
+async function addBucket() {
+  const inp = document.getElementById('new-bucket-input');
+  const name = inp.value.trim(); if (!name) return;
+  const newBucket = { id: nextBucketId++, name, collapsed: false, isIdeas: false };
+  buckets.push(newBucket);
+  inp.value = '';
+  renderBucketList();
+  render();
+  // Save to Supabase
+  await supa('buckets', {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates',
+    body: JSON.stringify([{ id: newBucket.id, name: newBucket.name, collapsed: false, is_ideas: false, sort_order: buckets.length, updated_at: new Date().toISOString() }])
+  });
+  toast('Bereich erstellt');
+}
+
+async function renameBucket(id) {
+  const b = buckets.find(b => b.id === id); if (!b) return;
+  const name = prompt('Bereich umbenennen:', b.name);
+  if (!name || !name.trim()) return;
+  b.name = name.trim();
+  renderBucketList();
+  render();
+  await supa('buckets', {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates',
+    body: JSON.stringify([{ id: b.id, name: b.name, collapsed: b.collapsed, is_ideas: b.isIdeas, sort_order: buckets.indexOf(b), updated_at: new Date().toISOString() }])
+  });
+  toast('Bereich umbenannt');
+}
+
+async function deleteBucket(id) {
+  const b = buckets.find(b => b.id === id); if (!b) return;
+  const count = tasks.filter(t => t.bucketId === id && !t.done).length;
+  const msg = count > 0 ? `Bereich «${b.name}» hat ${count} Pendenz(en) — alle werden in den ersten Bereich verschoben. Fortfahren?` : `Bereich «${b.name}» löschen?`;
+  if (!confirm(msg)) return;
+  const fallback = buckets.find(bb => bb.id !== id)?.id || buckets[0]?.id;
+  tasks.forEach(t => { if (t.bucketId === id) t.bucketId = fallback; });
+  buckets = buckets.filter(bb => bb.id !== id);
+  renderBucketList();
+  render();
+  // Delete from Supabase
+  await supa(`buckets?id=eq.${id}`, { method: 'DELETE', prefer: '' });
+  // Update moved tasks
+  const movedTasks = tasks.filter(t => t.bucketId === fallback);
+  if (movedTasks.length > 0) {
+    await supa('tasks', {
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates',
+      body: JSON.stringify(movedTasks.map(t => ({ id: t.id, title: t.title, notes: t.notes, prio: t.prio, type: t.type, who: t.who, date: t.date, done: t.done, source: t.source, bucket_id: fallback, updated_at: new Date().toISOString() })))
+    });
+  }
+  toast('Bereich gelöscht');
 }
 
 // ── INIT ─────────────────────────────────────────────────────────
