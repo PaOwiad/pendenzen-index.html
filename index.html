@@ -501,12 +501,15 @@ function showCfgStatus(msg, type) {
 // SUPABASE API
 // ═══════════════════════════════════════════════════════════════
 function supa(path, opts = {}) {
+  // Custom schema requires Accept-Profile / Content-Profile headers
   return fetch(`${SUPA_URL}/rest/v1/${path}`, {
     ...opts,
     headers: {
       'apikey': SUPA_KEY,
       'Authorization': 'Bearer ' + SUPA_KEY,
       'Content-Type': 'application/json',
+      'Accept-Profile': 'fw',
+      'Content-Profile': 'fw',
       'Prefer': opts.prefer || 'return=representation',
       ...(opts.headers || {}),
     },
@@ -522,9 +525,9 @@ async function loadFromSupabase() {
   setSyncDot('syncing');
   try {
     const [bRes, tRes, mRes] = await Promise.all([
-      supa('fw.buckets?order=sort_order'),
-      supa('fw.tasks?order=id'),
-      supa('fw.meta?select=key,value'),
+      supa('buckets?order=sort_order'),
+      supa('tasks?order=id'),
+      supa('meta?select=key,value'),
     ]);
     if (!bRes.ok) throw new Error('Buckets: ' + bRes.status);
     if (!tRes.ok) throw new Error('Tasks: ' + tRes.status);
@@ -575,14 +578,14 @@ async function seedDefaults() {
     { id:3, name:'Allgemein', collapsed:false, is_ideas:false, sort_order:2 },
     { id:4, name:'Ideenkatalog', collapsed:false, is_ideas:true, sort_order:3 },
   ];
-  await supa('fw.buckets', { method:'POST', body: JSON.stringify(defaultBuckets), prefer:'resolution=merge-duplicates' });
+  await supa('buckets', { method:'POST', body: JSON.stringify(defaultBuckets), prefer:'resolution=merge-duplicates' });
   buckets = defaultBuckets.map(b => ({ id:b.id, name:b.name, collapsed:false, isIdeas:b.is_ideas }));
   setSyncDot('ok');
   render();
 }
 
 async function saveMeta() {
-  await supa('fw.meta', {
+  await supa('meta', {
     method: 'POST',
     prefer: 'resolution=merge-duplicates',
     body: JSON.stringify([
@@ -602,7 +605,7 @@ async function upsertTask(t) {
       bucket_id: t.bucketId,
       updated_at: new Date().toISOString(),
     };
-    const res = await supa('fw.tasks', {
+    const res = await supa('tasks', {
       method: 'POST',
       prefer: 'resolution=merge-duplicates',
       body: JSON.stringify(row),
@@ -616,7 +619,7 @@ async function upsertTask(t) {
 async function deleteTask(id) {
   setSyncDot('syncing');
   try {
-    await supa(`fw.tasks?id=eq.${id}`, { method: 'DELETE', prefer: '' });
+    await supa(`tasks?id=eq.${id}`, { method: 'DELETE', prefer: '' });
     setSyncDot('ok');
   } catch(e) { setSyncDot('err'); }
 }
