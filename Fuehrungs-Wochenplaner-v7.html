@@ -5794,6 +5794,34 @@ async function fwpPullFromSupabase() {
 }
 
 
+
+function fwpExportLocalStorageJSON() {
+  try {
+    const raw = localStorage.getItem('fwp_all');
+    if (!raw) {
+      // Falls nichts im localStorage: aktuelle Daten nehmen
+      const data = collectAllData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'fwp-export-' + new Date().toISOString().slice(0,10) + '.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast('JSON exportiert');
+      return;
+    }
+    const blob = new Blob([raw], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'fwp-export-' + new Date().toISOString().slice(0,10) + '.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('JSON exportiert — jetzt importieren');
+  } catch(e) {
+    toast('Fehler: ' + e.message);
+  }
+}
+
 async function fwpImportFromFile(event) {
   const file = event.target.files[0];
   if (!file) return;
@@ -5803,17 +5831,32 @@ async function fwpImportFromFile(event) {
   const reader = new FileReader();
   reader.onload = async function(e) {
     try {
-      // Daten aus eingebettetem Script-Tag lesen
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(e.target.result, 'text/html');
-      const scriptTag = doc.getElementById('fwp-saved-data');
-      if (!scriptTag || !scriptTag.textContent.trim() || scriptTag.textContent.trim() === '{}') {
-        status.textContent = '⚠ Keine Daten in der Datei gefunden. Bitte zuerst 💾 Speichern klicken.';
+      let data = null;
+
+      if (file.name.endsWith('.json')) {
+        // JSON-Datei direkt
+        data = JSON.parse(e.target.result);
+      } else {
+        // HTML-Datei: erst eingebettetes Script-Tag prüfen
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(e.target.result, 'text/html');
+        const scriptTag = doc.getElementById('fwp-saved-data');
+        if (scriptTag && scriptTag.textContent.trim() && scriptTag.textContent.trim() !== '{}') {
+          data = JSON.parse(scriptTag.textContent);
+        }
+        // Falls leer: localStorage-Export-String aus HTML suchen (fwp_all)
+        if (!data || !data.tasks) {
+          const match = e.target.result.match(/localStorage\.setItem\('fwp_all',\s*'(.+?)'\)/);
+          if (match) data = JSON.parse(match[1]);
+        }
+      }
+
+      if (!data || !data.tasks) {
+        status.textContent = '⚠ Keine Daten gefunden. Bitte JSON-Export verwenden (siehe unten).';
         return;
       }
-      const data = JSON.parse(scriptTag.textContent);
 
-      // Daten in aktuelle Variablen laden
+      // Daten laden
       if (data.tasks)      tasks      = data.tasks;
       if (data.pdzBuckets) pdzBuckets = data.pdzBuckets;
       if (data.ids?.nextTaskId)   nextTaskId   = data.ids.nextTaskId;
@@ -5821,13 +5864,9 @@ async function fwpImportFromFile(event) {
       if (data.nextBucketId)      nextBucketId = data.nextBucketId;
 
       pdzMigrateTasks();
-
       status.textContent = `↻ ${tasks.length} Pendenzen gefunden — lade nach Supabase...`;
-
-      // Nach Supabase pushen
       await fwpDoSync();
-
-      status.textContent = `✓ ${tasks.filter(t=>!t.done).length} offene, ${tasks.filter(t=>t.done).length} erledigte Pendenzen übertragen!`;
+      status.textContent = `✓ ${tasks.filter(t=>!t.done).length} offen, ${tasks.filter(t=>t.done).length} erledigt — übertragen!`;
       pdzRender();
       saveAll();
 
@@ -9355,9 +9394,12 @@ document.getElementById('modal-logbuch').addEventListener('click', function(e) {
       <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.5;">
         Einmalig: exportierte HTML-Datei (💾 Speichern) auswählen → alle Pendenzen werden nach Supabase übertragen.
       </div>
+      <button onclick="fwpExportLocalStorageJSON()" style="display:block;width:100%;padding:10px;background:var(--text);color:white;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;margin-bottom:8px;">
+        ⬇ Schritt 1: Lokale Daten als JSON exportieren
+      </button>
       <label style="display:block;width:100%;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-size:13px;font-weight:500;color:var(--text2);cursor:pointer;text-align:center;">
-        📂 HTML-Datei importieren
-        <input type="file" accept=".html" style="display:none;" onchange="fwpImportFromFile(event)" />
+        📂 Schritt 2: JSON-Datei importieren & nach Supabase laden
+        <input type="file" accept=".html,.json" style="display:none;" onchange="fwpImportFromFile(event)" />
       </label>
       <div id="fwp-import-status" style="font-size:12px;color:var(--text2);margin-top:8px;min-height:18px;"></div>
     </div>
